@@ -1,0 +1,4 @@
+# Preview plugin: adds a live iframe tab for dev server preview
+- insert:
+    - id: dsh-preview
+      name: 'dsh-preview-plugin'

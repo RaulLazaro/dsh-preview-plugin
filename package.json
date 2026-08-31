@@ -1,0 +1,33 @@
+{
+  "name": "dsh-preview-plugin",
+  "version": "1.0.0",
+  "description": "Live preview tab for DSH — embed any dev server in an iframe",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-runtime"
+      ],
+      "platform": "web"
+    }
+  },
+  "files": [
+    "lib/",
+    "cordis.patch.yml"
+  ],
+  "license": "MIT"
+}
