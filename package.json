@@ -1,7 +1,7 @@
 {
   "name": "dsh-preview-plugin",
-  "version": "1.0.0",
-  "description": "Live preview tab for DSH — embed any dev server in an iframe",
+  "version": "1.1.0",
+  "description": "Live preview tab for DSH — embed any dev server in an iframe with SPA proxy and multi-app monorepo support",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
