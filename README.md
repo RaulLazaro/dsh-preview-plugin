@@ -5,9 +5,10 @@ Live preview tab for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-
 ## Features
 
 - **Path-based SPA proxy**: `/preview/:port/*` rewrites all routes so the embedded app works as if served from the DSH host
+- **Editable URL bar**: type a port, a path, a proxy path or a dev-server URL to move the preview wherever you need; the bar follows links clicked inside the page
 - **Multi-app monorepo support**: Configure backend ports to proxy API calls through the same iframe (e.g. Astro frontend + Payload CMS backend)
 - **Smart routing**: Static assets (JS, CSS, images) are proxied directly; SPA navigation serves root HTML so the client-side router handles routing
-- **Clean URLs**: `history.replaceState` strips the `/preview/PORT/` prefix so the SPA router sees paths like `/laptops` instead of `/preview/4321/laptops`
+- **Fragment-link safe**: `#section` links jump inside the page instead of reloading the site root, and anchors rendered after load are still reached
 - **Absolute URL rewriting**: Intercepts `fetch()` and `XMLHttpRequest.open()` to rewrite both relative and absolute URLs (e.g. `http://localhost:3001/api/...` → `/preview/3001/api/...`)
 - **Agent tool**: `set_preview_port` tool lets the agent configure ports programmatically when starting dev servers
 - **Global or per-session ports**: Set ports globally or per conversation session via the API
@@ -57,7 +58,27 @@ systemctl restart dsh
 
 1. Start your dev server on the VPS (e.g. `npm run dev -- --host 0.0.0.0 --port 3000`)
 2. Open the **Preview** tab in DSH Web GUI
-3. Enter the port number (e.g. `3000`) in the **Frontend** field and click **Go**
+3. Type the port (e.g. `3000`) in the **URL** field and click **Go**
+
+The field then switches to the page being shown (e.g. `/preview/3000/laptops?page=2#specs`),
+so you can edit it at any time and press **Enter** to load something else.
+
+### Navigating
+
+The **URL** field accepts all of these:
+
+| You type | It loads |
+|----------|----------|
+| `4321` | port 4321, root page |
+| `4321/laptops` | port 4321, `/laptops` |
+| `/laptops?page=2` | that path on the port already in use |
+| `laptops` | same as `/laptops` |
+| `?page=2` / `#specs` | the current page with that query/fragment |
+| `/preview/4321/laptops` | a proxy path, as-is |
+| `http://localhost:4321/laptops` | the dev-server URL |
+
+Non-local URLs are rejected (the proxy only reaches `127.0.0.1`). **↻** reloads the
+page currently shown, **↗** opens it in a browser tab of its own.
 
 ### Multi-app monorepo
 
@@ -71,7 +92,7 @@ systemctl restart dsh
    ```
 
 2. Open the **Preview** tab
-3. Enter `4321` in **Frontend** and `3001` in **Backend** (comma-separated for multiple)
+3. Type `4321` in **URL** and `3001` in **Backend** (comma-separated for multiple)
 4. Click **Go** — API calls to `http://localhost:3001/api/...` are automatically proxied through `/preview/3001/api/...`
 
 ### Agent tool
@@ -103,9 +124,27 @@ This updates the interceptor script and client UI automatically.
 4. For HTML responses, it injects:
    - `<base href="/preview/:port/">` for relative URL resolution
    - An interceptor script that:
-     - Calls `history.replaceState` to strip the `/preview/PORT/` prefix (so the router sees clean paths)
+     - Handles fragment links (`#section`) itself: with a `<base>` tag they would otherwise
+       resolve to `/preview/:port/#section`, a *different path*, and reload the site root
+       instead of jumping inside the page. Targets that appear later (SPA sections) are
+       retried for a few seconds.
      - Rewrites `fetch()` and `XMLHttpRequest.open()` URLs (relative, absolute frontend, and absolute backend)
 5. For non-HTML responses, it streams the response directly
+
+## Testing
+
+```bash
+pnpm install
+pnpm test
+```
+
+`node --test` runs three suites:
+
+| Suite | What it covers |
+|-------|----------------|
+| `test/client-helpers.test.mjs` | URL/port parsing (`resolveTarget`) and proxy-path helpers |
+| `test/preview-view.test.mjs` | The Preview tab component with real React and happy-dom |
+| `test/preview-proxy.test.mjs` | The proxy end-to-end against a fixture site with Playwright (skipped when Chromium is unavailable) |
 
 ## Security Notes
 
