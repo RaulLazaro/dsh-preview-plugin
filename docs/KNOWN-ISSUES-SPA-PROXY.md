@@ -68,6 +68,27 @@ set_preview_port(port: 4321, backendPorts: [3001])
   fragment whose target is rendered after load is retried for a few seconds.
 - **Regression tests.** `test/preview-proxy.test.mjs` (fixture site + Playwright).
 
+### 6. Root-relative images and `srcset` 404'd (v1.2.0)
+
+- **Symptom.** Product images rendered (the site prefixes them itself) but store logos
+  were broken: `GET http://<dsh-host>/api/media/file/store-amazon-es.svg → 404`, while
+  `/preview/4321/api/media/file/...` answered 200.
+- **Cause.** A `<base href="/preview/4321/">` only affects **truly relative** URLs.
+  Anything starting with `/` resolves against the **origin**, so `/api/media/...` asked
+  the DSH host for a file that only exists on the dev server. The proxy rewrote
+  `<script src>` and `<link href>` server-side and anchors on click, but nothing rewrote
+  resource attributes — so `<img src>`, `srcset`, `poster` and JS-inserted nodes were
+  left pointing at the origin root. The site worked around it in its own code, which is
+  why only the images rebuilt later (after its boot script had run) were affected.
+- **Fix.** Root-relative resource URLs are now rewritten in two layers: the initial HTML
+  is rewritten server-side, and the injected interceptor rewrites them at runtime —
+  `setAttribute` is wrapped, and a `MutationObserver` covers nodes inserted later
+  (`innerHTML`, `new Image()`, dynamically added stylesheets). 22/22 images load on the
+  laptop-comparator listing page with no 4xx at all.
+- **Regression test.** `root-relative resources load through the proxy` in
+  `test/preview-proxy.test.mjs` (static `<img>`, `<picture><source srcset>`, `poster`,
+  `new Image()`, `innerHTML`, injected stylesheet).
+
 ## Configuration
 
 What to preview is set via:

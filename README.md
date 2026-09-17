@@ -9,6 +9,7 @@ Live preview tab for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-
 - **Multi-app monorepo support**: Configure backend ports to proxy API calls through the same iframe (e.g. Astro frontend + Payload CMS backend)
 - **Smart routing**: Static assets (JS, CSS, images) are proxied directly; SPA navigation serves root HTML so the client-side router handles routing
 - **Fragment-link safe**: `#section` links jump inside the page instead of reloading the site root, and anchors rendered after load are still reached
+- **Root-relative resources work**: `/assets/photo.png`, `srcset` and `poster` are rewritten too, so images and lazy-loaded stylesheets load instead of 404ing against the DSH host
 - **Absolute URL rewriting**: Intercepts `fetch()` and `XMLHttpRequest.open()` to rewrite both relative and absolute URLs (e.g. `http://localhost:3001/api/...` → `/preview/3001/api/...`)
 - **Agent tool**: `set_preview_port` tool lets the agent configure ports programmatically when starting dev servers
 - **Global or per-session ports**: Set ports globally or per conversation session via the API
@@ -129,7 +130,11 @@ This updates the interceptor script and client UI automatically.
        instead of jumping inside the page. Targets that appear later (SPA sections) are
        retried for a few seconds.
      - Rewrites `fetch()` and `XMLHttpRequest.open()` URLs (relative, absolute frontend, and absolute backend)
-5. For non-HTML responses, it streams the response directly
+     - Rewrites root-relative resource URLs (`src`, `srcset`, `poster`, `data-src`, and
+       resource `<link href>`) on nodes added by JS — a `<base>` tag only affects truly
+       relative URLs, so `"/assets/x.png"` would otherwise be fetched from the DSH host
+5. Resource URLs in the initial HTML are rewritten server-side, before the page is sent
+6. For non-HTML responses, it streams the response directly
 
 ## Testing
 

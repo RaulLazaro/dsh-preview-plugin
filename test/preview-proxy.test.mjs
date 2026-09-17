@@ -40,6 +40,28 @@ const FIXTURE = {
     ${tall('spacer', 'SPACER')}
     <section id="target" style="min-height:400px;background:#ddd">TARGET</section>
   `),
+  '/media': page('media', `
+    <h1 id="media-h1">MEDIA</h1>
+    <img id="static" src="/asset/static.png" width="4" height="4" alt="">
+    <picture>
+      <source srcset="/asset/source.png 1x">
+      <img id="picture" src="/asset/picture.png" width="4" height="4" alt="">
+    </picture>
+    <video id="video" poster="/asset/poster.png" width="4" height="4"></video>
+    <div id="slot"></div>
+    <script>
+      var created = new Image();
+      created.id = 'dynamic'; created.width = 4; created.height = 4;
+      created.src = '/asset/dynamic.png';
+      document.body.appendChild(created);
+      setTimeout(function(){
+        document.getElementById('slot').innerHTML = '<img id="late" src="/asset/late.png" width="4" height="4" alt="">';
+        var link = document.createElement('link');
+        link.rel = 'stylesheet'; link.href = '/asset/extra.css';
+        document.head.appendChild(link);
+      }, 200);
+    </script>
+  `),
   '/late': page('late', `
     <h1 id="late-h1">LATE</h1>
     <div style="min-height:1500px"></div>
@@ -54,9 +76,26 @@ function listen(server) {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
 }
 
+// A 1x1 PNG: real bytes, so `naturalWidth` proves the image actually loaded.
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+
 function startFixture() {
   const server = http.createServer((req, res) => {
-    const body = FIXTURE[new URL(req.url, 'http://localhost').pathname];
+    const pathname = new URL(req.url, 'http://localhost').pathname;
+    if (pathname.startsWith('/asset/')) {
+      if (pathname.endsWith('.css')) {
+        res.writeHead(200, { 'content-type': 'text/css' });
+        res.end('#media-h1 { color: rgb(1, 2, 3); }');
+      } else {
+        res.writeHead(200, { 'content-type': 'image/png' });
+        res.end(PNG);
+      }
+      return;
+    }
+    const body = FIXTURE[pathname];
     if (body === undefined) {
       res.writeHead(404, { 'content-type': 'text/plain' });
       res.end('not found');
@@ -125,6 +164,11 @@ after(async () => {
 async function withPage(fn) {
   const context = await browser.newContext({ viewport: { width: 900, height: 600 } });
   const browserPage = await context.newPage();
+  // Anything the page asked for and did not get: a proxied site must not 404.
+  browserPage.failedResponses = [];
+  browserPage.on('response', (r) => {
+    if (r.status() >= 400) browserPage.failedResponses.push(`${r.status()} ${r.url()}`);
+  });
   try {
     return await fn(browserPage);
   } finally {
@@ -198,6 +242,33 @@ test('a fragment whose target renders later is still reached', async (t) => {
     await browserPage.waitForTimeout(1500);
     const state = await snapshot(browserPage);
     assert.ok(state.scrollY > 1000, `did not scroll to the late target (scrollY=${state.scrollY})`);
+  });
+});
+
+test('root-relative resources load through the proxy', async (t) => {
+  if (skipBrowser) return t.skip(skipBrowser);
+  await withPage(async (browserPage) => {
+    await browserPage.goto(`${base}/media`, { waitUntil: 'load' });
+    await browserPage.waitForTimeout(1500);
+    const state = await browserPage.evaluate(() => ({
+      images: [...document.images].map((i) => ({ src: i.getAttribute('src'), loaded: i.complete && i.naturalWidth > 0 })),
+      stylesheet: (() => {
+        const link = document.querySelector('link[rel="stylesheet"][href*="extra.css"]');
+        return link && link.getAttribute('href');
+      })(),
+      colour: getComputedStyle(document.getElementById('media-h1')).color,
+    }));
+    assert.equal(state.images.length, 4, `expected 4 images, got ${state.images.length}`);
+    for (const image of state.images) {
+      assert.ok(
+        String(image.src).startsWith(`/preview/${fixture.port}/`),
+        `${image.src} was not proxied (root-relative URLs ignore the base tag)`,
+      );
+      assert.ok(image.loaded, `${image.src} did not load`);
+    }
+    assert.equal(state.stylesheet, `/preview/${fixture.port}/asset/extra.css`);
+    assert.equal(state.colour, 'rgb(1, 2, 3)', 'the injected stylesheet did not apply');
+    assert.deepEqual(browserPage.failedResponses, []);
   });
 });
 
