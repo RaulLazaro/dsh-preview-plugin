@@ -1,6 +1,6 @@
 # SPA Proxy: Multi-App Monorepo Support
 
-**Status: ✅ Resolved** (v1.1.0, 2026-09-14; fragment links in v1.2.0)
+**Status: ✅ Resolved** (v1.1.0, 2026-09-14; fragment links, resources and API writes in v1.2.0–v1.2.1)
 
 ## Original Problem
 
@@ -88,6 +88,21 @@ set_preview_port(port: 4321, backendPorts: [3001])
 - **Regression test.** `root-relative resources load through the proxy` in
   `test/preview-proxy.test.mjs` (static `<img>`, `<picture><source srcset>`, `poster`,
   `new Image()`, `innerHTML`, injected stylesheet).
+
+### 7. Writes never reached the API (v1.2.1)
+
+- **Symptom.** In the preview, logging in or submitting a form did nothing useful: the
+  API answered `403 {"errors":[{"message":"You are not allowed to perform this action."}]}`
+  — Payload's reply to a **GET** on a POST-only route.
+- **Cause.** The proxy issued `fetch(targetUrl, { headers })` with no `method` and no
+  body, so every request reached the upstream as a GET, and `PUT`/`PATCH`/`DELETE` were
+  rejected with 405 before that. A direct POST to the same route returns 400
+  ("This field is required: email"), which is how the two were told apart.
+- **Fix.** The proxy now forwards the method, the request headers (minus hop-by-hop ones)
+  and the body, and returns `Set-Cookie`, `Location` and `Allow` upstream. HTML rewriting
+  is limited to GET/HEAD so an API response that happens to be HTML is left alone.
+- **Regression tests.** `the proxy forwards the HTTP method and the request body` and
+  `the proxy passes request cookies through and returns upstream cookies`.
 
 ## Configuration
 

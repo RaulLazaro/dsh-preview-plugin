@@ -11,6 +11,7 @@ Live preview tab for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-
 - **Fragment-link safe**: `#section` links jump inside the page instead of reloading the site root, and anchors rendered after load are still reached
 - **Root-relative resources work**: `/assets/photo.png`, `srcset` and `poster` are rewritten too, so images and lazy-loaded stylesheets load instead of 404ing against the DSH host
 - **Absolute URL rewriting**: Intercepts `fetch()` and `XMLHttpRequest.open()` to rewrite both relative and absolute URLs (e.g. `http://localhost:3001/api/...` → `/preview/3001/api/...`)
+- **Real API traffic**: Method, body, cookies and `Set-Cookie` are forwarded, so the embedded app can log in, submit forms and use `PUT`/`PATCH`/`DELETE` — not just serve pages
 - **Agent tool**: `set_preview_port` tool lets the agent configure ports programmatically when starting dev servers
 - **Global or per-session ports**: Set ports globally or per conversation session via the API
 - **Auto-sync**: The preview tab polls the host for agent-set port changes
@@ -134,7 +135,9 @@ This updates the interceptor script and client UI automatically.
        resource `<link href>`) on nodes added by JS — a `<base>` tag only affects truly
        relative URLs, so `"/assets/x.png"` would otherwise be fetched from the DSH host
 5. Resource URLs in the initial HTML are rewritten server-side, before the page is sent
-6. For non-HTML responses, it streams the response directly
+6. Requests keep their method, headers and body, and `Set-Cookie` comes back, so
+   sessions and writes work inside the preview
+7. For non-HTML responses, it streams the response directly
 
 ## Testing
 
