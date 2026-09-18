@@ -169,6 +169,18 @@ test('the address bar follows in-iframe navigation', async () => {
   } finally { await ui.unmount(); }
 });
 
+test('an app that leaves the proxy is brought back inside it', async () => {
+  // `location.href = "/account"` in the app lands the iframe on the DSH origin,
+  // where the real app is not; the tab notices and reloads it under the prefix.
+  const ui = await mount({ iframePath: '/account' });
+  try {
+    await ui.fireLoad();
+    assert.equal(ui.iframe().getAttribute('src'), '/preview/4321/account');
+    assert.equal(ui.input().value, '/preview/4321/account');
+    assert.match(ui.text(), /tried to leave the preview/);
+  } finally { await ui.unmount(); }
+});
+
 test('what cannot be previewed is reported instead of silently loading', async () => {
   const ui = await mount();
   try {
