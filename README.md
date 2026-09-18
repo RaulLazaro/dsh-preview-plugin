@@ -12,6 +12,8 @@ Live preview tab for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-
 - **Root-relative resources work**: `/assets/photo.png`, `srcset` and `poster` are rewritten too, so images and lazy-loaded stylesheets load instead of 404ing against the DSH host
 - **Absolute URL rewriting**: Intercepts `fetch()` and `XMLHttpRequest.open()` to rewrite both relative and absolute URLs (e.g. `http://localhost:3001/api/...` → `/preview/3001/api/...`)
 - **Real API traffic**: Method, body, cookies and `Set-Cookie` are forwarded, so the embedded app can log in, submit forms and use `PUT`/`PATCH`/`DELETE` — not just serve pages
+- **Navigation stays inside the preview**: forms, `history.pushState`, `window.open` and links that open a new tab keep the proxy prefix; an app that assigns `location.href` (which no script can intercept) is brought back instead of leaving you on the DSH app
+- **Port config survives restarts**: what you set is written to `$DSH_HOME/preview-plugin.json` and restored when DSH starts again
 - **Agent tool**: `set_preview_port` tool lets the agent configure ports programmatically when starting dev servers
 - **Global or per-session ports**: Set ports globally or per conversation session via the API
 - **Auto-sync**: The preview tab polls the host for agent-set port changes
@@ -138,6 +140,20 @@ This updates the interceptor script and client UI automatically.
 6. Requests keep their method, headers and body, and `Set-Cookie` comes back, so
    sessions and writes work inside the preview
 7. For non-HTML responses, it streams the response directly
+
+## Persistence
+
+The preview config (frontend port + backend ports) is stored in
+`${DSH_HOME:-~/.dsh}/preview-plugin.json`, so it survives a DSH restart and is shared by
+every session. Deleting the file simply resets it; a corrupt file is ignored.
+
+## Known limit
+
+`location.href = "/…"`, `location.assign()` and `location.replace()` cannot be
+intercepted: browsers install them as non-configurable own properties of the `location`
+object (`[LegacyUnforgeable]`). The preview tab notices the escape and reloads that path
+under the proxy, but an app that wants a clean URL should build it from its own base
+(e.g. Astro's `import.meta.env.BASE_URL`) or use a relative path.
 
 ## Testing
 

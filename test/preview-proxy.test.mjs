@@ -99,6 +99,22 @@ function startFixture() {
     }
     // Assets may be requested through a nested preview prefix: strip it.
     if (pathname.startsWith('/preview/')) pathname = pathname.replace(/^\/preview\/\d+/, '');
+    if (pathname === '/navigate') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(page('navigate', `
+        <h1 id="navigate-h1">NAVIGATE</h1>
+        <form id="go-form" action="/other" method="GET"><button type="submit">go</button></form>
+        <a id="blank" href="/other" target="_blank">other in a tab</a>
+        <script>
+          window.__after = {};
+          window.__probe = function (what) {
+            if (what === 'push') history.pushState({}, '', '/other');
+            if (what === 'assign') location.assign('/other');
+          };
+        </script>
+      `));
+      return;
+    }
     if (pathname === '/echo') {
       const chunks = [];
       req.on('data', (c) => chunks.push(c));
@@ -364,6 +380,41 @@ test('an already-prefixed URL is not prefixed twice', async (t) => {
     assert.equal(state.image, `/preview/${fixture.port}/asset/static.png`);
     assert.ok(state.loaded, 'the prefixed image did not load');
     assert.equal(state.colour, 'rgb(1, 2, 3)', 'the prefixed stylesheet did not apply');
+    assert.deepEqual(browserPage.failedResponses, []);
+  });
+});
+
+test('navigation APIs keep the preview prefix', async (t) => {
+  if (skipBrowser) return t.skip(skipBrowser);
+  await withPage(async (browserPage) => {
+    await browserPage.goto(`${base}/navigate`, { waitUntil: 'load' });
+    await browserPage.waitForTimeout(300);
+
+    // history.pushState
+    await browserPage.evaluate(() => window.__probe('push'));
+    await browserPage.waitForTimeout(300);
+    assert.equal(new URL(browserPage.url()).pathname, `/preview/${fixture.port}/other`);
+
+    // NOTE: location.href/assign/replace cannot be intercepted — Chrome installs
+    // them as non-configurable own properties of the location object. An app that
+    // uses them is recovered by the preview tab instead (see preview-view.test.mjs).
+
+    // form action
+    await browserPage.goto(`${base}/navigate`, { waitUntil: 'load' });
+    assert.equal(await browserPage.getAttribute('#go-form', 'action'), `/preview/${fixture.port}/other`);
+    await browserPage.click('#go-form button');
+    await browserPage.waitForTimeout(500);
+    assert.equal(new URL(browserPage.url()).pathname, `/preview/${fixture.port}/other`);
+
+    // a link that opens elsewhere keeps the prefix in the tab it opens
+    await browserPage.goto(`${base}/navigate`, { waitUntil: 'load' });
+    const [popup] = await Promise.all([
+      browserPage.waitForEvent('popup'),
+      browserPage.click('#blank'),
+    ]);
+    await popup.waitForLoadState('domcontentloaded');
+    assert.equal(new URL(popup.url()).pathname, `/preview/${fixture.port}/other`);
+    await popup.close();
     assert.deepEqual(browserPage.failedResponses, []);
   });
 });

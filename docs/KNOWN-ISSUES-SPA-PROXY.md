@@ -118,6 +118,30 @@ set_preview_port(port: 4321, backendPorts: [3001])
 - **Regression test.** `an already-prefixed URL is not prefixed twice` (the fixture
   serves a page whose HTML already carries the prefix, plus nested asset paths).
 
+### 9. Navigation left the preview, and the port config died with the process (v1.3.0)
+
+- **Symptom.** Three kinds of navigation escaped `/preview/PORT/` and landed on the DSH
+  origin: the app's own forms (`<form action="/laptops">`), its `history.pushState`
+  calls, and links with `target="_blank"`. Separately, the port configuration was lost
+  on every DSH restart because the plugin only kept it in memory.
+- **Cause (navigation).** Only anchors and `fetch`/XHR were rewritten. A form action, a
+  history entry or a new tab is not a click on a link, so nothing prefixed them.
+- **Cause (state).** `globalPort`/`globalBackendPorts` were module-level variables and
+  the host half is re-imported on every restart.
+- **Fix.** The interceptor also rewrites `action`, wraps `history.pushState` /
+  `history.replaceState` and `window.open`, and prefixes the `href` of links that open
+  elsewhere before letting the browser follow them. The config is written to
+  `${DSH_HOME:-~/.dsh}/preview-plugin.json` on every change and read when the plugin
+  mounts, so a restart keeps previewing the same thing.
+- **Hard limit.** `location.href`, `location.assign` and `location.replace` are
+  `[LegacyUnforgeable]`: Chrome installs them as non-configurable own properties of the
+  `location` object, so no injected script can rewrite them. The preview tab detects the
+  escape and loads that path under the proxy again (amber notice), but the durable fix
+  belongs in the app (build the URL from its base) — see the README.
+- **Regression tests.** `navigation APIs keep the preview prefix`,
+  `an app that leaves the proxy is brought back inside it` and
+  `test/host-state.test.mjs` (fresh mount per restart, corrupt file tolerated).
+
 ## Configuration
 
 What to preview is set via:
