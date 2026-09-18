@@ -1,6 +1,6 @@
 # SPA Proxy: Multi-App Monorepo Support
 
-**Status: ✅ Resolved** (v1.1.0, 2026-09-14)
+**Status: ✅ Resolved** (v1.1.0, 2026-09-14; fragment links in v1.2.0)
 
 ## Original Problem
 
@@ -40,12 +40,10 @@ The proxy now detects static assets by file extension and serves them directly. 
 
 ### 3. Clean URLs for SPA router
 
-The interceptor calls `history.replaceState` to strip the `/preview/PORT/` prefix from the iframe URL, so the SPA router sees clean paths:
-
-```
-Browser URL: /preview/4321/laptops
-Router sees: /laptops
-```
+The iframe keeps the real proxy path (`/preview/4321/laptops`) — an earlier attempt
+to strip it with `history.replaceState` was removed (see git history) because it
+desynchronised the address bar from what was actually loaded. The proxy strips the
+prefix server-side instead, so the router only ever sees upstream paths.
 
 ### 4. Agent tool
 
@@ -55,11 +53,48 @@ The `set_preview_port` tool lets the agent configure ports programmatically:
 set_preview_port(port: 4321, backendPorts: [3001])
 ```
 
+### 5. Fragment links (`#section`) sent the visitor to the site root (v1.2.0)
+
+- **Symptom.** On any page below the root — e.g. `/es/privacy` — clicking one of its
+  own in-page links (`#cookies`, the `#main-content` skip link, `href="#"`) left the
+  page and landed on the home page.
+- **Cause.** The proxy injects `<base href="/preview/4321/">`. A fragment reference is
+  resolved against the **document base URL**, so from `/preview/4321/es/privacy` the
+  browser computed `/preview/4321/#cookies`: a different *path*, therefore a full
+  navigation — the proxy served the root HTML.
+- **Fix.** The injected interceptor handles fragment-only links itself
+  (`preventDefault` + same-document `location.hash`, which the `<base>` cannot affect).
+  Cross-page links that carry a fragment (`/other#target`) keep working, and a
+  fragment whose target is rendered after load is retried for a few seconds.
+- **Regression tests.** `test/preview-proxy.test.mjs` (fixture site + Playwright).
+
+### 6. Root-relative images and `srcset` 404'd (v1.2.0)
+
+- **Symptom.** Product images rendered (the site prefixes them itself) but store logos
+  were broken: `GET http://<dsh-host>/api/media/file/store-amazon-es.svg → 404`, while
+  `/preview/4321/api/media/file/...` answered 200.
+- **Cause.** A `<base href="/preview/4321/">` only affects **truly relative** URLs.
+  Anything starting with `/` resolves against the **origin**, so `/api/media/...` asked
+  the DSH host for a file that only exists on the dev server. The proxy rewrote
+  `<script src>` and `<link href>` server-side and anchors on click, but nothing rewrote
+  resource attributes — so `<img src>`, `srcset`, `poster` and JS-inserted nodes were
+  left pointing at the origin root. The site worked around it in its own code, which is
+  why only the images rebuilt later (after its boot script had run) were affected.
+- **Fix.** Root-relative resource URLs are now rewritten in two layers: the initial HTML
+  is rewritten server-side, and the injected interceptor rewrites them at runtime —
+  `setAttribute` is wrapped, and a `MutationObserver` covers nodes inserted later
+  (`innerHTML`, `new Image()`, dynamically added stylesheets). 22/22 images load on the
+  laptop-comparator listing page with no 4xx at all.
+- **Regression test.** `root-relative resources load through the proxy` in
+  `test/preview-proxy.test.mjs` (static `<img>`, `<picture><source srcset>`, `poster`,
+  `new Image()`, `innerHTML`, injected stylesheet).
+
 ## Configuration
 
-Backend ports are configured via:
+What to preview is set via:
 
-- **UI**: Enter comma-separated ports in the "Backend" field
+- **UI**: the **URL** field (port, path, proxy path or dev-server URL) plus the
+  comma-separated **Backend** ports field
 - **API**: `POST /api/preview-port { "port": 4321, "backendPorts": [3001] }`
 - **Tool**: `set_preview_port(port: 4321, backendPorts: [3001])`
 

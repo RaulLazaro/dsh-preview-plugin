@@ -1,9 +1,12 @@
 {
   "name": "dsh-preview-plugin",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Live preview tab for DSH — embed any dev server in an iframe with SPA proxy and multi-app monorepo support",
   "type": "module",
   "main": "lib/index.js",
+  "scripts": {
+    "test": "node --test"
+  },
   "exports": {
     ".": {
       "default": "./lib/index.js"
@@ -32,5 +35,11 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "happy-dom": "^20.14.5",
+    "playwright-core": "1.62.1",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  }
 }
