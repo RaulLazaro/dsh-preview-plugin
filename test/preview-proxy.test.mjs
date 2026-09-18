@@ -85,6 +85,26 @@ const PNG = Buffer.from(
 function startFixture() {
   const server = http.createServer((req, res) => {
     const pathname = new URL(req.url, 'http://localhost').pathname;
+    if (pathname === '/echo') {
+      const chunks = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8');
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({
+          method: req.method,
+          contentType: req.headers['content-type'] || null,
+          cookie: req.headers.cookie || null,
+          body: raw ? JSON.parse(raw) : null,
+        }));
+      });
+      return;
+    }
+    if (pathname === '/setcookie') {
+      res.writeHead(200, { 'content-type': 'text/plain', 'set-cookie': 'preview_probe=42; Path=/' });
+      res.end('cookie set');
+      return;
+    }
     if (pathname.startsWith('/asset/')) {
       if (pathname.endsWith('.css')) {
         res.writeHead(200, { 'content-type': 'text/css' });
@@ -269,6 +289,49 @@ test('root-relative resources load through the proxy', async (t) => {
     assert.equal(state.stylesheet, `/preview/${fixture.port}/asset/extra.css`);
     assert.equal(state.colour, 'rgb(1, 2, 3)', 'the injected stylesheet did not apply');
     assert.deepEqual(browserPage.failedResponses, []);
+  });
+});
+
+test('the proxy forwards the HTTP method and the request body', async (t) => {
+  if (skipBrowser) return t.skip(skipBrowser);
+  await withPage(async (browserPage) => {
+    await browserPage.goto(`${base}/media`, { waitUntil: 'load' });
+    const result = await browserPage.evaluate(async (port) => {
+      const call = async (method, body) => {
+        const init = { method };
+        if (body !== undefined) {
+          init.headers = { 'content-type': 'application/json' };
+          init.body = JSON.stringify(body);
+        }
+        return (await fetch(`/preview/${port}/echo`, init)).json();
+      };
+      return {
+        post: await call('POST', { hello: 'world' }),
+        put: await call('PUT', { n: 1 }),
+        patch: await call('PATCH', { n: 2 }),
+        delete: await call('DELETE'),
+      };
+    }, fixture.port);
+    assert.equal(result.post.method, 'POST');
+    assert.deepEqual(result.post.body, { hello: 'world' });
+    assert.equal(result.put.method, 'PUT');
+    assert.deepEqual(result.put.body, { n: 1 });
+    assert.equal(result.patch.method, 'PATCH');
+    assert.equal(result.delete.method, 'DELETE');
+  });
+});
+
+test('the proxy passes request cookies through and returns upstream cookies', async (t) => {
+  if (skipBrowser) return t.skip(skipBrowser);
+  await withPage(async (browserPage) => {
+    await browserPage.goto(`${base}/media`, { waitUntil: 'load' });
+    const result = await browserPage.evaluate(async (port) => {
+      await fetch(`/preview/${port}/setcookie`);
+      const seen = await (await fetch(`/preview/${port}/echo`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json();
+      return { cookie: document.cookie, upstreamSaw: seen.cookie };
+    }, fixture.port);
+    assert.match(result.cookie, /preview_probe=42/);
+    assert.match(String(result.upstreamSaw), /preview_probe=42/);
   });
 });
 
