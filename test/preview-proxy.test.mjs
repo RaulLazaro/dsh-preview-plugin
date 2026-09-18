@@ -85,6 +85,20 @@ const PNG = Buffer.from(
 function startFixture() {
   const server = http.createServer((req, res) => {
     const pathname = new URL(req.url, 'http://localhost').pathname;
+    // A site may already emit preview-prefixed URLs (a build with a base path).
+    // The proxy must never add a second prefix.
+    if (pathname === '/prefixed') {
+      const p = server.address().port;
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(page('prefixed', `
+        <h1 id="prefixed-h1">PREFIXED</h1>
+        <link rel="stylesheet" href="/preview/${p}/asset/extra.css">
+        <img id="prefixed-img" src="/preview/${p}/asset/static.png" width="4" height="4" alt="">
+      `));
+      return;
+    }
+    // Assets may be requested through a nested preview prefix: strip it.
+    if (pathname.startsWith('/preview/')) pathname = pathname.replace(/^\/preview\/\d+/, '');
     if (pathname === '/echo') {
       const chunks = [];
       req.on('data', (c) => chunks.push(c));
@@ -108,7 +122,7 @@ function startFixture() {
     if (pathname.startsWith('/asset/')) {
       if (pathname.endsWith('.css')) {
         res.writeHead(200, { 'content-type': 'text/css' });
-        res.end('#media-h1 { color: rgb(1, 2, 3); }');
+        res.end('#media-h1, #prefixed-h1 { color: rgb(1, 2, 3); }');
       } else {
         res.writeHead(200, { 'content-type': 'image/png' });
         res.end(PNG);
@@ -332,6 +346,25 @@ test('the proxy passes request cookies through and returns upstream cookies', as
     }, fixture.port);
     assert.match(result.cookie, /preview_probe=42/);
     assert.match(String(result.upstreamSaw), /preview_probe=42/);
+  });
+});
+
+test('an already-prefixed URL is not prefixed twice', async (t) => {
+  if (skipBrowser) return t.skip(skipBrowser);
+  await withPage(async (browserPage) => {
+    await browserPage.goto(`${base}/prefixed`, { waitUntil: 'load' });
+    await browserPage.waitForTimeout(800);
+    const state = await browserPage.evaluate(() => ({
+      stylesheet: document.querySelector('link[rel="stylesheet"]').getAttribute('href'),
+      image: document.getElementById('prefixed-img').getAttribute('src'),
+      loaded: (() => { const i = document.getElementById('prefixed-img'); return i.complete && i.naturalWidth > 0; })(),
+      colour: getComputedStyle(document.getElementById('prefixed-h1')).color,
+    }));
+    assert.equal(state.stylesheet, `/preview/${fixture.port}/asset/extra.css`);
+    assert.equal(state.image, `/preview/${fixture.port}/asset/static.png`);
+    assert.ok(state.loaded, 'the prefixed image did not load');
+    assert.equal(state.colour, 'rgb(1, 2, 3)', 'the prefixed stylesheet did not apply');
+    assert.deepEqual(browserPage.failedResponses, []);
   });
 });
 

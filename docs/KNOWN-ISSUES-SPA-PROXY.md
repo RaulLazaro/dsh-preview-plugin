@@ -104,6 +104,20 @@ set_preview_port(port: 4321, backendPorts: [3001])
 - **Regression tests.** `the proxy forwards the HTTP method and the request body` and
   `the proxy passes request cookies through and returns upstream cookies`.
 
+### 8. A site that already prefixes its own URLs got a double prefix (v1.2.2)
+
+- **Symptom.** Every stylesheet and image in the preview 404'd on
+  `/preview/4321/preview/4321/_astro/...`.
+- **Cause.** The site's build was emitting `/preview/4321/...` URLs already (a build
+  with a base path). The proxy's `<link href>` and CSS `url(/...)` rules prefixed
+  unconditionally, while the `src`/`srcset` rules checked first — so the same HTML was
+  rewritten twice.
+- **Fix.** Every prefix rule now goes through `prefixRootRelative()`, which leaves
+  absolute (`//host/...`) and already-prefixed URLs alone. The proxy is idempotent, so
+  it works whether the app emits root-relative or preview-prefixed URLs.
+- **Regression test.** `an already-prefixed URL is not prefixed twice` (the fixture
+  serves a page whose HTML already carries the prefix, plus nested asset paths).
+
 ## Configuration
 
 What to preview is set via:
