@@ -1,6 +1,6 @@
 # SPA Proxy: Multi-App Monorepo Support
 
-**Status: ✅ Resolved** (v1.1.0, 2026-09-14; fragment links, resources and API writes in v1.2.0–v1.2.1)
+**Status: ✅ Resolved** (v1.1.0, 2026-09-14; fragment links, resources and API writes in v1.2.0–v1.2.1; proxy hardening in v1.3.1)
 
 ## Original Problem
 
@@ -37,6 +37,11 @@ The proxy now detects static assets by file extension and serves them directly. 
 /preview/4321/_astro/app.js → proxies asset directly
 /preview/4321/favicon.svg  → proxies asset directly
 ```
+
+> Historical note: the "always serve the root HTML" rule was later dropped
+> because it broke Vite's extension-less URLs (`/@vite/client`, `/@id/…`).
+> §13 below reintroduces a narrower rule — only when the upstream really
+> answers `404` — with regression tests.
 
 ### 3. Clean URLs for SPA router
 
@@ -141,6 +146,77 @@ set_preview_port(port: 4321, backendPorts: [3001])
 - **Regression tests.** `navigation APIs keep the preview prefix`,
   `an app that leaves the proxy is brought back inside it` and
   `test/host-state.test.mjs` (fresh mount per restart, corrupt file tolerated).
+
+### 10. Any web site could read the proxied dev servers (v1.3.1)
+
+- **Symptom.** The proxy answered every response — and every preflight — with
+  `access-control-allow-origin: *`.
+- **Cause.** Convenience for local development, added before the proxy grew its
+  current shape. A wildcard `ACAO` means the browser hands the response body to
+  *any* page that asks, so a web site the user visits could walk
+  `http://<dsh-host>:<port>/preview/1…/`, learn which loopback ports are alive
+  and read what they serve, all from the user's own browser.
+- **Fix.** The preview is same-origin by design (the iframe lives on the DSH
+  origin), so CORS now only echoes an `Origin` that matches the DSH `Host`
+  header, and a cross-origin preflight is refused with `403`. Requests without
+  an `Origin` header are unaffected.
+- **Regression tests.** `a foreign origin cannot read proxied responses`,
+  `a cross-origin preflight is refused`, `the DSH origin itself is still answered`.
+
+### 11. The proxy buffered anything it was asked to forward (v1.3.1)
+
+- **Symptom.** A request body of any size was read into memory before it was
+  forwarded, and `/preview/<n>` accepted `<n>` values that are not TCP ports
+  (`99999`), which only failed later as a confusing `502`.
+- **Cause.** No bound on `readRawBody()`, and the port check was a `^\d{1,5}$
+  regex instead of a range.
+- **Fix.** Bodies are capped (8 MiB for the proxy, 64 KiB for the port API;
+  `DSH_PREVIEW_MAX_BODY_BYTES` overrides both) and answered with `413` +
+  `connection: close` — checked against the declared `Content-Length` first and
+  again mid-stream for chunked requests. Every entry point (proxy, WebSocket
+  upgrade, port API, `set_preview_port` tool) now validates the port as
+  1–65535, and out-of-range values posted to the API are dropped instead of
+  stored.
+- **Regression tests.** `ports outside 1-65535 are refused before anything is
+  dialled`, `a request body over the cap is refused instead of buffered`,
+  `the port config endpoint refuses oversized bodies too`.
+
+### 12. A wedged dev server held a preview request open forever (v1.3.1)
+
+- **Symptom.** Saving a file that made the dev server restart, or any upstream
+  that went silent mid-response, left the preview hanging with no answer; a
+  failure after the first byte could also throw `ERR_HTTP_HEADERS_SENT` while
+  reporting it.
+- **Cause.** The 15 s timer stopped the moment the upstream sent its headers,
+  so the body phase had no bound at all, and the error path always called
+  `writeHead()` even when bytes were already on the wire.
+- **Fix.** One timer governs the whole exchange, refreshed on every chunk
+  (a *stall* timeout, so a slow but talking upstream is never cut): silent
+  before the first byte → `502 upstream timeout`; silent after → the response is
+  torn down. Errors after the first byte destroy the response instead of
+  writing a second status line.
+- **Regression tests.** `an upstream that goes silent before the page is
+  finished answers 502`, `an upstream that stalls mid-stream is torn down and
+  the proxy survives`, `a slow but talking upstream is never cut off`.
+
+### 13. Deep links the dev server 404'd never booted the SPA (v1.3.1)
+
+- **Symptom.** Refreshing a client-side route (e.g. `/preview/4321/shop/laptop`
+  on a dev server without a history fallback) showed the dev server's `404`
+  instead of the app, so the router never started.
+- **Cause.** Since v1.1.0 the proxy passes everything straight through — which
+  was the right fix for §2's broken extension-less Vite URLs, but it also
+  dropped the documented SPA fallback (README: "SPA navigation serves root
+  HTML").
+- **Fix.** The root HTML is used only when *all* of these hold: the upstream
+  really answered `404`, the request is a `GET`/`HEAD` whose `Accept` includes
+  `text/html` (a top-level navigation), and the path has no file extension. The
+  browser keeps the deep link; the shell is fetched from `/` and injected as
+  usual. Missing assets, API `404`s, `POST`s and every path the dev server does
+  serve keep their real answer — the regression that forced §2's revert.
+- **Regression tests.** `test/spa-fallback.test.mjs`: the shell for an unknown
+  deep link, the real `404` for a missing asset, an API `404`, a rejected
+  `POST`, and a served extension-less path (`/src/main`).
 
 ## Configuration
 
