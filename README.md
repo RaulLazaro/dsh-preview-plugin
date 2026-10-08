@@ -28,6 +28,16 @@ In your DSH web profile's `package.json`:
 ```json
 {
   "dependencies": {
+    "dsh-preview-plugin": "^1.3.1"
+  }
+}
+```
+
+Installing from a local checkout works the same way:
+
+```json
+{
+  "dependencies": {
     "dsh-preview-plugin": "file:~/workspace/dsh-preview-plugin"
   }
 }
