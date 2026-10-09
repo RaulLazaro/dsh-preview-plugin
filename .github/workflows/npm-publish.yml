@@ -33,8 +33,16 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '24.x'
           registry-url: https://registry.npmjs.org
+
+      - name: Verify tag matches package.json
+        run: |
+          VERSION="v$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $VERSION"
+            exit 1
+          fi
 
       - name: Install dependencies
         run: |
