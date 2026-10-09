@@ -28,7 +28,7 @@ In your DSH web profile's `package.json`:
 ```json
 {
   "dependencies": {
-    "dsh-preview-plugin": "^1.3.1"
+    "dsh-preview-plugin": "^1.3.2"
   }
 }
 ```
@@ -167,6 +167,28 @@ The preview config (frontend port + backend ports) is stored in
 `${DSH_HOME:-~/.dsh}/preview-plugin.json`, so it survives a DSH restart and is shared by
 every session. Deleting the file simply resets it; a corrupt file is ignored.
 
+## State and cleanup
+
+Besides the persisted global config, the host keeps in-memory state: one entry
+per session (keyed by session id, holding that session's frontend and backend
+ports) and a frontend-port → backend-ports lookup the proxy reads. Two rules
+keep both bounded on a long-lived box:
+
+- **Purge on session close.** The plugin listens for DSH's `session/disposed`
+  and drops everything the session contributed — its entry, plus a port mapping
+  that only that session justified.
+- **Hard cap with LRU eviction.** At most `DSH_PREVIEW_MAX_SESSIONS` sessions
+  are tracked (default **64**; values below 1 fall back to the default). When
+  the cap is exceeded, the least recently *written* session is evicted first —
+  but never the active session: the one whose preview tab last polled
+  `GET /api/preview-port?sessionId=…`, i.e. the session on screen. This is the
+  safety net for sessions whose `session/disposed` never arrives.
+
+A port mapping survives only while something still points at it: the global
+config for its own port, or at least one live session. Changing the global port
+or moving a session to another port releases the mapping it replaced, and a
+surviving claimant's mapping is re-derived instead of deleted.
+
 ## Known limit
 
 `location.href = "/…"`, `location.assign()` and `location.replace()` cannot be
@@ -182,7 +204,7 @@ pnpm install
 pnpm test
 ```
 
-`node --test` runs six suites:
+`node --test` runs eight suites:
 
 | Suite | What it covers |
 |-------|----------------|
@@ -192,6 +214,8 @@ pnpm test
 | `test/proxy-security.test.mjs` | Same-origin-only CORS, port range, request body caps |
 | `test/proxy-timeout.test.mjs` | Stall timeout over the whole exchange, safe teardown of a half-sent response |
 | `test/spa-fallback.test.mjs` | `404` → app shell for HTML navigations, and everything that must keep its real `404` |
+| `test/host-state.test.mjs` | The port config surviving a restart, read from `$DSH_HOME/preview-plugin.json` |
+| `test/session-state.test.mjs` | Purge on `session/disposed`, port-mapping ownership, LRU cap and the active-session exemption |
 
 ## Security Notes
 
