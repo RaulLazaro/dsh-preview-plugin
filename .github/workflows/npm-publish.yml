@@ -1,0 +1,61 @@
+# Publish dsh-preview-plugin to npm when a version tag is pushed:
+#
+#   git tag v1.3.1 && git push origin v1.3.1
+#
+# `--provenance` builds a signed provenance statement through OIDC, which is
+# what `id-token: write` is for; NODE_AUTH_TOKEN is the automation token npm
+# reads from the registry configuration setup-node writes.
+#
+# The repository ignores package-lock.json (pnpm-lock.yaml is the lockfile the
+# project actually uses), so the install step falls back to `npm install`; the
+# `npm ci` branch starts working as soon as a package-lock.json is committed.
+# Playwright's browser tests skip themselves when Chromium is unavailable, so
+# the suite stays green on a bare runner.
+name: npm-publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    name: Test and publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          registry-url: https://registry.npmjs.org
+
+      - name: Verify tag matches package.json
+        run: |
+          VERSION="v$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $VERSION"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Run tests
+        run: node --test test/*.mjs
+
+      - name: Publish to npm
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
