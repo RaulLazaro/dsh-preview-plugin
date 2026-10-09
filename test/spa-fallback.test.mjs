@@ -53,6 +53,7 @@ function startProxy() {
   const ctx = {
     get: () => undefined,
     effect: (fn) => { const dispose = fn(); return () => { if (typeof dispose === 'function') dispose(); }; },
+    on: () => () => {},
     webServer: {
       register: (def) => { routes.push(def); return () => {}; },
       registerUpgrade: () => () => {},

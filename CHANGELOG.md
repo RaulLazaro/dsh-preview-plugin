@@ -4,6 +4,39 @@ All notable changes to `dsh-preview-plugin` are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.3.2 — 2026-10-09
+
+### Fixed
+
+- **Per-session preview state is purged when its session closes.** The host
+  now listens for DSH's `session/disposed` and drops everything the session
+  contributed: its entry in the in-memory maps, plus any frontend-port →
+  backend-ports mapping only that session justified. Previously nothing
+  reacted to a session closing, so a long-lived box collected orphaned
+  entries forever.
+- **A port mapping never outlives what justifies it.** The mapping is
+  re-derived from the state that remains — the global config is authoritative
+  for its own port, otherwise the most recently written surviving session —
+  and dropped when nothing points at the port anymore. Changing the global
+  port or moving a session to another frontend port now releases the mapping
+  it replaced instead of leaking it.
+
+### Added
+
+- **A hard cap on tracked sessions with LRU eviction** as a safety net for
+  sessions whose `session/disposed` never arrives: `DSH_PREVIEW_MAX_SESSIONS`
+  (default 64; values below 1 fall back to the default) bounds the per-session
+  maps, evicting the least recently written session first. The *active*
+  session — the one whose preview tab last polled
+  `GET /api/preview-port?sessionId=…`, i.e. the session on screen — is never
+  evicted, and a disposed active session stops being protected.
+
+### Tests
+
+- 46 → 57 tests: `test/session-state.test.mjs` covers the purge on
+  `session/disposed`, port-mapping ownership (session, shared and global),
+  eviction over the cap and the active-session exemption.
+
 ## 1.3.1 — 2026-10-08
 
 ### Security
